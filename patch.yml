@@ -1,6 +1,6 @@
 ---
 - name: Patch Ubuntu Servers
-  hosts: servers
+  hosts: all
   become: yes
 
   tasks:
