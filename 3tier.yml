@@ -1,0 +1,146 @@
+---
+- name: Setup Tomcat and Nginx
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    tomcat_version: "9.0.75"
+    tomcat_major_version: "{{ tomcat_version.split('.')[0] }}"
+    tomcat_url: "https://dlcdn.apache.org/tomcat/tomcat-{{ tomcat_major_version }}/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    tomcat_tar_file: "apache-tomcat-{{ tomcat_version }}.tar.gz"
+    tomcat_dir: "apache-tomcat-{{ tomcat_version | regex_replace('\\.[0-9]+', '') }}"
+    student_war_file: "https://raw.githubusercontent.com/techworldwithsiva/shell-scripting-01/master/application/student.war"
+    mysql_driver: "https://raw.githubusercontent.com/techworldwithsiva/shell-scripting-01/master/application/mysql-connector-5.1.18.jar"
+
+  tasks:
+    # - name: Check root access
+    #   assert:
+    #     that: "ansible_user_id == 0"
+    #     msg: "Please run this script with root access"
+    #   run_once: true
+
+    - name: Install required packages
+      yum:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - policycoreutils-python-utils
+        - wget
+        - vim
+        - net-tools
+        - openjdk-8-jdk
+        - mariadb-server
+        - nginx
+
+    - name: Install PyMySQL module
+      pip:
+        name: pymysql
+        state: present
+    # - name: Enable traffic from Nginx to Tomcat (SELinux)
+    #   seboolean:
+    #     name: httpd_can_network_connect
+    #     persistent: yes
+    #     state: yes
+
+    - name: Start and enable MariaDB
+      systemd:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    - name: Create database and grant privileges
+      mysql_db:
+        name: studentapp
+        state: present
+      become: yes
+      become_user: ansible
+
+    - name: Create database user and grant privileges
+      mysql_user:
+        name: student
+        password: student@1
+        priv: "studentapp.*:ALL"
+        state: present
+      become: yes
+      become_user: ansible
+
+    - name: Download Tomcat if it doesn't exist
+      get_url:
+        url: "{{ tomcat_url }}"
+        dest: "/opt/{{ tomcat_tar_file }}"
+        mode: 0644
+      when: not tomcat_dir is version
+
+    - name: Extract Tomcat
+      unarchive:
+        src: "/opt/{{ tomcat_tar_file }}"
+        dest: "/opt"
+        remote_src: yes
+        creates: "/opt/{{ tomcat_dir }}"
+      when: not tomcat_dir is version
+
+    - name: Download Student app WAR file
+      get_url:
+        url: "{{ student_war_file }}"
+        dest: "/opt/{{ tomcat_dir }}/webapps/student.war"
+        mode: 0644
+
+    - name: Download MySQL Connector
+      get_url:
+        url: "{{ mysql_driver }}"
+        dest: "/opt/{{ tomcat_dir }}/lib/mysql-connector-5.1.18.jar"
+        mode: 0644
+
+    - name: Configure Tomcat context.xml
+      blockinfile:
+        path: "/opt/{{ tomcat_dir }}/conf/context.xml"
+        marker: ""
+        block: |
+          <Resource name="jdbc/TestDB" auth="Container" type="javax.sql.DataSource"
+                    maxTotal="100"
+                    maxIdle="30" maxWaitMillis="10000"
+                    username="student" password="student@1"
+                    driverClassName="com.mysql.jdbc.Driver"
+                    url="jdbc:mysql://localhost:3306/studentapp"/>
+      when: not tomcat_dir is version
+
+    - name: Start Tomcat
+      command: "{{ item }}/bin/startup.sh"
+      args:
+        chdir: "/opt/{{ tomcat_dir }}"
+      register: tomcat_start_result
+      changed_when: tomcat_start_result.stdout_lines is search('Tomcat started')
+      failed_when: tomcat_start_result.stderr_lines
+      when: not tomcat_dir is version
+
+    - name: Install Nginx configuration
+      copy:
+        content: |
+          location / {
+            proxy_pass http://127.0.0.1:8080/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+          }
+        dest: "/etc/nginx/default.d/student.conf"
+        mode: 0644
+
+    - name: Remove default Nginx location block
+      lineinfile:
+        path: "/etc/nginx/nginx.conf"
+        state: absent
+        regexp: "^\\s*location / \\{"
+        backrefs: yes
+
+    - name: Restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+  handlers:
+    - name: Stop Tomcat
+      command: "{{ item }}/bin/shutdown.sh"
+      args:
+        chdir: "/opt/{{ tomcat_dir }}"
+      ignore_errors: true
+      when: not tomcat_dir is version
