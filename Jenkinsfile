@@ -7,9 +7,7 @@ pipeline {
         
         stage('Run Ansible Playbook') {
   steps {
-    ansiblePlaybook becomeUser: 'mpvarma9997',
-                   colorized: true,
-                   playbook: './test.yml'
+    ansible-playbook test.yml
                    
     }
   }
