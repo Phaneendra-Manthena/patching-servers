@@ -1,18 +1,18 @@
 pipeline {
   agent {
-        label 'slave'
+        label 'workstation'
     }
 
     stages {
         
         stage('Run Ansible Playbook') {
   steps {
-    ansiblePlaybook becomeUser: 'ansible',
+    ansiblePlaybook becomeUser: 'mpvarma9997',
                    colorized: true,
-                   credentialsId: 'ansible-privatekey',
-                   installation: 'Ansible',
+                   credentialsId: 'ansiblesshkey',
+                   installation: 'ansible',
                    inventory: './hosts',
-                   playbook: './patch.yml'
+                   playbook: './test.yml'
     }
   }
  }
