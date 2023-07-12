@@ -7,7 +7,7 @@ pipeline {
         
         stage('Run Ansible Playbook') {
   steps {
-    ansible-playbook test.yml
+    sh "ansible-playbook test.yml"
                    
     }
   }
